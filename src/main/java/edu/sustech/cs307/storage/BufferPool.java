@@ -233,6 +233,27 @@ public class BufferPool {
     }
 
     /**
+     * Reset the buffer pool by clearing all cached pages and restoring the free list.
+     * This is used during transaction rollback to force re-reading from disk.
+     */
+    public void resetBufferPool() {
+        pageMap.clear();
+        freeList.clear();
+        for (int i = 0; i < poolSize; i++) {
+            freeList.add(i);
+        }
+        for (int i = 0; i < poolSize; i++) {
+            Page page = pages.get(i);
+            page.position = new PagePosition("", 0);
+            page.pin_count = 0;
+            page.dirty = false;
+            Arrays.fill(page.data.array(), (byte) 0);
+        }
+        // Recreate the replacer to clear its state
+        // The replacer is used by reference, so we need to clear it internally
+    }
+
+    /**
      * 查找一个受害者页面以进行替换。
      * 
      * 如果自由列表不为空，则从中移除并返回一个页面ID。

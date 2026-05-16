@@ -61,9 +61,14 @@ public class DiskManager {
 
     public static void dump_disk_manager_meta(DiskManager disk_manager) throws DBException {
         Map<String, Integer> filePages = disk_manager.filePages;
-        Path path = Path.of(String.format("%s/%s", DBEntry.DB_NAME, DISK_MANAGER_META));
+        String dir = disk_manager.getCurrentDir();
+        Path path = Path.of(String.format("%s/%s", dir, DISK_MANAGER_META));
         // write the meta file
         File META_FILE = new File(path.toString());
+        // Ensure parent directory exists
+        if (META_FILE.getParentFile() != null) {
+            META_FILE.getParentFile().mkdirs();
+        }
         try (Writer writer = new FileWriter(META_FILE)) {
             ObjectMapper objectMapper = new ObjectMapper();
             objectMapper.writeValue(writer, filePages);

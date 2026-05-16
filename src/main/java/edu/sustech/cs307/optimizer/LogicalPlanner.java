@@ -27,6 +27,11 @@ import edu.sustech.cs307.exception.DBException;
 public class LogicalPlanner {
     private static final Pattern BEGIN_PATTERN = Pattern.compile("(?i)^BEGIN(?:\\s+(?:WORK|TRANSACTION))?$");
     private static final Pattern START_TRANSACTION_PATTERN = Pattern.compile("(?i)^START\\s+TRANSACTION$");
+    private static final Pattern ROLLBACK_PATTERN = Pattern.compile("(?i)^ROLLBACK(?:\\s+(?:WORK|TRANSACTION))?$");
+    private static final Pattern SAVEPOINT_PATTERN =
+            Pattern.compile("(?i)^SAVEPOINT\\s+([A-Za-z_][A-Za-z0-9_]*)$");
+    private static final Pattern ROLLBACK_TO_SAVEPOINT_PATTERN =
+            Pattern.compile("(?i)^ROLLBACK(?:\\s+(?:WORK|TRANSACTION))?\\s+TO(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
     private static final Pattern RELEASE_SAVEPOINT_PATTERN =
             Pattern.compile("(?i)^RELEASE(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
 
@@ -128,6 +133,38 @@ public class LogicalPlanner {
             dbManager.beginTransaction();
             return true;
         }
+
+        // Check ROLLBACK (not to savepoint)
+        Matcher rollbackMatcher = ROLLBACK_PATTERN.matcher(normalizedSql);
+        if (rollbackMatcher.matches()) {
+            dbManager.getTransactionManager().rollback();
+            return true;
+        }
+
+        // Check ROLLBACK TO SAVEPOINT
+        Matcher rollbackToSpMatcher = ROLLBACK_TO_SAVEPOINT_PATTERN.matcher(normalizedSql);
+        if (rollbackToSpMatcher.matches()) {
+            String savepointName = rollbackToSpMatcher.group(1);
+            dbManager.getTransactionManager().rollbackToSavepoint(savepointName);
+            return true;
+        }
+
+        // Check SAVEPOINT
+        Matcher savepointMatcher = SAVEPOINT_PATTERN.matcher(normalizedSql);
+        if (savepointMatcher.matches()) {
+            String savepointName = savepointMatcher.group(1);
+            dbManager.getTransactionManager().savepoint(savepointName);
+            return true;
+        }
+
+        // Check RELEASE SAVEPOINT
+        Matcher releaseSpMatcher = RELEASE_SAVEPOINT_PATTERN.matcher(normalizedSql);
+        if (releaseSpMatcher.matches()) {
+            String savepointName = releaseSpMatcher.group(1);
+            dbManager.getTransactionManager().releaseSavepoint(savepointName);
+            return true;
+        }
+
         return false;
     }
 

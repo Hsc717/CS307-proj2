@@ -96,4 +96,13 @@ public class MetaManager {
             throw new DBException(ExceptionTypes.UnableLoadMetadata(e.getMessage()));
         }
     }
+
+    /**
+     * Clears all in-memory metadata and reloads from the JSON file on disk.
+     * Used after transaction rollback to ensure consistent state.
+     */
+    public void reloadFromDisk() throws DBException {
+        tables.clear();
+        loadFromJson();
+    }
 }

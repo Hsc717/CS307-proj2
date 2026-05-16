@@ -1,0 +1,11 @@
+E:\CS307-proj2\src\test\java\index\BPlusTreeTest.java
+E:\CS307-proj2\src\test\java\meta\MetaManagerTest.java
+E:\CS307-proj2\src\test\java\record\BitMapTest.java
+E:\CS307-proj2\src\test\java\record\RecordFileHandleTest.java
+E:\CS307-proj2\src\test\java\storage\BufferPoolTest.java
+E:\CS307-proj2\src\test\java\storage\ClockReplacerTest.java
+E:\CS307-proj2\src\test\java\storage\DiskManagerTest.java
+E:\CS307-proj2\src\test\java\storage\LRUReplacerTest.java
+E:\CS307-proj2\src\test\java\system\RecordManagerTest.java
+E:\CS307-proj2\src\test\java\system\TransactionManagerTest.java
+E:\CS307-proj2\src\test\java\value\ValueComparerTest.java
