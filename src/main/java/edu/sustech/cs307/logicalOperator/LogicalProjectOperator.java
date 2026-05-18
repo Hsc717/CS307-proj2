@@ -5,6 +5,8 @@ import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.meta.TabCol;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.select.AllColumns;
+import net.sf.jsqlparser.statement.select.GroupByElement;
+import net.sf.jsqlparser.statement.select.OrderByElement;
 import net.sf.jsqlparser.statement.select.SelectItem;
 
 import java.util.ArrayList;
@@ -15,11 +17,20 @@ public class LogicalProjectOperator extends LogicalOperator {
 
     private final List<SelectItem<?>> selectItems;
     private final LogicalOperator child;
+    private final GroupByElement groupBy;
+    private final List<OrderByElement> orderByElements;
 
     public LogicalProjectOperator(LogicalOperator child, List<SelectItem<?>> selectItems) {
+        this(child, selectItems, null, null);
+    }
+
+    public LogicalProjectOperator(LogicalOperator child, List<SelectItem<?>> selectItems,
+                                  GroupByElement groupBy, List<OrderByElement> orderByElements) {
         super(Collections.singletonList(child));
         this.child = child;
         this.selectItems = selectItems;
+        this.groupBy = groupBy;
+        this.orderByElements = orderByElements;
     }
 
     public LogicalOperator getChild() {
@@ -29,14 +40,27 @@ public class LogicalProjectOperator extends LogicalOperator {
     public List<TabCol> getOutputSchema() throws DBException {
         List<TabCol> outputSchema = new ArrayList<>();
         for (SelectItem<?> selectItem : selectItems) {
-            //todo : add selectItem.getExpression() instance of Column
             if (selectItem.getExpression() instanceof AllColumns column) {
                 outputSchema.add(new TabCol("*", "*"));
+            } else if (selectItem.getExpression() instanceof Column column) {
+                outputSchema.add(new TabCol(column.getTableName(), column.getColumnName()));
             } else {
                 throw new DBException(ExceptionTypes.NotSupportedOperation(selectItem.getExpression()));
             }
         }
         return outputSchema;
+    }
+
+    public List<SelectItem<?>> getSelectItems() {
+        return selectItems;
+    }
+
+    public GroupByElement getGroupBy() {
+        return groupBy;
+    }
+
+    public List<OrderByElement> getOrderByElements() {
+        return orderByElements;
     }
 
     @Override

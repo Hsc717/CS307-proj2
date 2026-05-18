@@ -36,6 +36,8 @@ public class PhysicalPlanner {
             return handleInsert(dbManager, insertOperator);
         } else if (logicalOp instanceof LogicalUpdateOperator updateOperator) {
             return handleUpdate(dbManager, updateOperator);
+        } else if (logicalOp instanceof LogicalDeleteOperator deleteOperator) {
+            return handleDelete(dbManager, deleteOperator);
         }
 
         else {
@@ -75,15 +77,17 @@ public class PhysicalPlanner {
         PhysicalOperator joinOp = new NestedLoopJoinOperator(leftOp, rightOp, logicalJoinOp.getJoinExprs());
 
         Collection<Expression> joinFilters = logicalJoinOp.getJoinExprs();
-        PhysicalOperator finalOp = new FilterOperator(joinOp, joinFilters);
-
-        return finalOp;
+        if (joinFilters == null || joinFilters.isEmpty()) {
+            return joinOp;
+        }
+        return new FilterOperator(joinOp, joinFilters);
     }
 
     private static PhysicalOperator handleProject(DBManager dbManager, LogicalProjectOperator logicalProjectOp)
             throws DBException {
         PhysicalOperator inputOp = generateOperator(dbManager, logicalProjectOp.getChild());
-        return new ProjectOperator(inputOp, logicalProjectOp.getOutputSchema());
+        return new ProjectOperator(inputOp, logicalProjectOp.getSelectItems(),
+                logicalProjectOp.getGroupBy(), logicalProjectOp.getOrderByElements());
     }
 
     /**
@@ -194,5 +198,10 @@ public class PhysicalPlanner {
             throw new DBException(ExceptionTypes.InvalidSQL("INSERT", "Unsupported expression list"));
         }
         return new UpdateOperator(scanner, logicalUpdateOp.getTableName(), logicalUpdateOp.getColumns().get(0), logicalUpdateOp.getExpression());
+    }
+
+    private static PhysicalOperator handleDelete(DBManager dbManager, LogicalDeleteOperator logicalDeleteOp) throws DBException {
+        PhysicalOperator scanner = generateOperator(dbManager, logicalDeleteOp.getChild());
+        return new DeleteOperator(scanner, logicalDeleteOp.getTableName(), logicalDeleteOp.getWhereExpr());
     }
 }

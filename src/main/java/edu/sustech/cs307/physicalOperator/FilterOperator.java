@@ -24,8 +24,7 @@ public class FilterOperator implements PhysicalOperator {
 
     public FilterOperator(PhysicalOperator child, Collection<Expression> whereExpr) {
         this.child = child;
-        // 只使用第一个表达式，简化逻辑
-        this.whereExpr = whereExpr.iterator().next();
+        this.whereExpr = whereExpr == null || whereExpr.isEmpty() ? null : whereExpr.iterator().next();
     }
 
     @Override
@@ -86,7 +85,7 @@ public class FilterOperator implements PhysicalOperator {
             Tuple tuple = child.Current();
 
             // 如果元组不为空且满足条件，则设置为当前元组并标记为已准备好
-            if (tuple != null && tuple.eval_expr(whereExpr)) {
+            if (tuple != null && (whereExpr == null || tuple.eval_expr(whereExpr))) {
                 Logger.debug("FilterOperator找到匹配的元组: " + tuple);
                 currentTuple = tuple;
                 readyForNext = true;

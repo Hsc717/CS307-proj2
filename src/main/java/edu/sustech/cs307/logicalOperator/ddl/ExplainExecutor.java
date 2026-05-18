@@ -2,8 +2,11 @@ package edu.sustech.cs307.logicalOperator.ddl;
 
 import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.exception.DBException;
+import edu.sustech.cs307.logicalOperator.LogicalOperator;
+import edu.sustech.cs307.optimizer.LogicalPlanner;
 
 import net.sf.jsqlparser.statement.ExplainStatement;
+import org.pmw.tinylog.Logger;
 
 public class ExplainExecutor implements DMLExecutor {
 
@@ -17,6 +20,11 @@ public class ExplainExecutor implements DMLExecutor {
 
     @Override
     public void execute() throws DBException {
-       //todo: finish this function here, and add log info
+        if (explainStatement.getStatement() == null) {
+            Logger.info(explainStatement);
+            return;
+        }
+        LogicalOperator operator = LogicalPlanner.handleSelect(dbManager, explainStatement.getStatement());
+        Logger.info(operator);
     }
 }

@@ -79,6 +79,10 @@ public class Value {
             case CHAR -> {
                 ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
                 var length = buffer3.getInt();
+                if (length < 0 || length > bytes.length - 4) {
+                    length = Math.max(0, Math.min(bytes.length, new String(bytes).trim().length()));
+                    yield new Value(new String(bytes).trim());
+                }
                 // int is 4 byte
                 String s = new String(bytes, 4, length);
                 yield new Value(s);
@@ -96,10 +100,14 @@ public class Value {
             }
             case CHAR -> {
                 byte[] bytes = ((String) this.value).getBytes();
-                ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
-                var length = buffer3.getInt();
-                // int is 4 byte
-                return new String(bytes, 4, length);
+                if (bytes.length >= 4) {
+                    ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
+                    int length = buffer3.getInt();
+                    if (length >= 0 && length <= bytes.length - 4) {
+                        return new String(bytes, 4, length);
+                    }
+                }
+                return ((String) this.value).trim();
             }
             default -> throw new RuntimeException("Unsupported value type: " + type);
         }

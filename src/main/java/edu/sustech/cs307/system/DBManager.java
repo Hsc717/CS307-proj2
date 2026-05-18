@@ -9,13 +9,11 @@ import edu.sustech.cs307.storage.BufferPool;
 import edu.sustech.cs307.storage.DiskManager;
 import edu.sustech.cs307.storage.replacer.ClockReplacer;
 import edu.sustech.cs307.storage.replacer.PageReplacer;
-import org.apache.commons.lang3.StringUtils;
 import org.pmw.tinylog.Logger;
 
 import java.io.File;
-import java.io.IOException;
-import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.function.IntFunction;
 
 public class DBManager {
@@ -79,18 +77,21 @@ public class DBManager {
      * Each table name is displayed in a separate row within the ASCII borders.
      */
     public void showTables() {
-        throw new RuntimeException("Not implement");
-        //todo: complete show table
-        // | -- TABLE -- |
-        // | -- ${table} -- |
-        // | ----------- |
+        Logger.info("|-----------|");
+        Logger.info("|  Tables   |");
+        Logger.info("|-----------|");
+        metaManager.getTableNames().stream().sorted().forEach(table -> Logger.info("| {} |", table));
+        Logger.info("|-----------|");
     }
 
-    public void descTable(String table_name) {
-        throw new RuntimeException("Not implemented yet");
-        //todo: complete describe table
-        // | -- TABLE Field -- | -- Column Type --|
-        // | --  ${table field} --| -- ${table type} --|
+    public void descTable(String table_name) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(table_name);
+        Logger.info("|-------------------------|");
+        Logger.info("| Field | Type |");
+        tableMeta.columns_list.stream()
+                .sorted(Comparator.comparingInt(ColumnMeta::getOffset))
+                .forEach(col -> Logger.info("| {} | {} |", col.name, col.type));
+        Logger.info("|-------------------------|");
     }
 
     /**
@@ -128,7 +129,18 @@ public class DBManager {
      *                     errors during deletion
      */
     public void dropTable(String table_name) throws DBException {
-        // todo: finish drop table method
+        if (!isTableExists(table_name)) {
+            throw new DBException(ExceptionTypes.TableDoesNotExist(table_name));
+        }
+        String dataFile = String.format("%s/%s", table_name, "data");
+        bufferPool.DeleteAllPages(dataFile);
+        recordManager.DeleteFile(dataFile);
+        File tableDir = new File(String.format("%s/%s", diskManager.getCurrentDir(), table_name));
+        if (tableDir.exists()) {
+            deleteDirectory(tableDir);
+        }
+        metaManager.dropTable(table_name);
+        Logger.info("Successfully dropped table: {}", table_name);
     }
 
     /**

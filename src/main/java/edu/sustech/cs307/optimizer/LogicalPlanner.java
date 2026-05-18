@@ -8,10 +8,14 @@ import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.parser.CCJSqlParserManager;
 import net.sf.jsqlparser.parser.JSqlParser;
 import net.sf.jsqlparser.statement.Commit;
+import net.sf.jsqlparser.statement.DescribeStatement;
 import net.sf.jsqlparser.statement.ExplainStatement;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.delete.Delete;
+import net.sf.jsqlparser.statement.drop.Drop;
 import net.sf.jsqlparser.statement.select.*;
+import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
@@ -34,6 +38,7 @@ public class LogicalPlanner {
             Pattern.compile("(?i)^ROLLBACK(?:\\s+(?:WORK|TRANSACTION))?\\s+TO(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
     private static final Pattern RELEASE_SAVEPOINT_PATTERN =
             Pattern.compile("(?i)^RELEASE(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
+    private static final Pattern SHOW_TABLES_PATTERN = Pattern.compile("(?i)^SHOW\\s+TABLES$");
 
     public static LogicalOperator resolveAndPlan(DBManager dbManager, String sql) throws DBException {
         if (sql == null || sql.isBlank()) {
@@ -61,7 +66,9 @@ public class LogicalPlanner {
             dbManager.commitTransaction();
             return null;
         }
-        //todo: add condition of handleDelete
+        else if (stmt instanceof Delete deleteStmt) {
+            operator = handleDelete(dbManager, deleteStmt);
+        }
         // functional
         else if (stmt instanceof CreateTable createTableStmt) {
             CreateTableExecutor createTable = new CreateTableExecutor(createTableStmt, dbManager, sql);
@@ -72,8 +79,17 @@ public class LogicalPlanner {
             explainExecutor.execute();
             return null;
         } else if (stmt instanceof ShowStatement showStatement) {
-            ShowDatabaseExecutor showDatabaseExecutor = new ShowDatabaseExecutor(showStatement);
+            ShowDatabaseExecutor showDatabaseExecutor = new ShowDatabaseExecutor(showStatement, dbManager);
             showDatabaseExecutor.execute();
+            return null;
+        } else if (stmt instanceof DescribeStatement describeStatement) {
+            dbManager.descTable(describeStatement.getTable().getName());
+            return null;
+        } else if (stmt instanceof Drop dropStatement) {
+            if (!dropStatement.getType().equalsIgnoreCase("TABLE")) {
+                throw new DBException(ExceptionTypes.UnsupportedCommand(dropStatement.toString()));
+            }
+            dbManager.dropTable(dropStatement.getName().getName());
             return null;
         } else {
             throw new DBException(ExceptionTypes.UnsupportedCommand((stmt.toString())));
@@ -87,14 +103,14 @@ public class LogicalPlanner {
         if (plainSelect.getFromItem() == null) {
             throw new DBException(ExceptionTypes.UnsupportedCommand((plainSelect.toString())));
         }
-        LogicalOperator root = new LogicalTableScanOperator(plainSelect.getFromItem().toString(), dbManager);
+        LogicalOperator root = new LogicalTableScanOperator(tableNameOf(plainSelect.getFromItem()), dbManager);
 
         int depth = 0;
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
                 root = new LogicalJoinOperator(
                         root,
-                        new LogicalTableScanOperator(join.getRightItem().toString(), dbManager),
+                        new LogicalTableScanOperator(tableNameOf(join.getRightItem()), dbManager),
                         join.getOnExpressions(),
                         depth);
                 depth += 1;
@@ -105,7 +121,8 @@ public class LogicalPlanner {
         if (plainSelect.getWhere() != null) {
             root = new LogicalFilterOperator(root, plainSelect.getWhere());
         }
-        root = new LogicalProjectOperator(root, plainSelect.getSelectItems());
+        root = new LogicalProjectOperator(root, plainSelect.getSelectItems(),
+                plainSelect.getGroupBy(), plainSelect.getOrderByElements());
         return root;
     }
 
@@ -119,6 +136,19 @@ public class LogicalPlanner {
         return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),
                 updateStmt.getWhere());
     }
+
+    private static LogicalOperator handleDelete(DBManager dbManager, Delete deleteStmt) throws DBException {
+        String tableName = deleteStmt.getTable().getName();
+        LogicalOperator root = new LogicalTableScanOperator(tableName, dbManager);
+        return new LogicalDeleteOperator(root, tableName, deleteStmt.getWhere());
+    }
+
+    private static String tableNameOf(FromItem item) throws DBException {
+        if (item instanceof Table table) {
+            return table.getName();
+        }
+        throw new DBException(ExceptionTypes.UnsupportedCommand(item.toString()));
+    }
     private static String normalizeSql(String sql) {
         String normalizedSql = sql == null ? "" : sql.trim();
         while (normalizedSql.endsWith(";")) {
@@ -129,6 +159,11 @@ public class LogicalPlanner {
 
     private static boolean handleManualTransactionCommand(DBManager dbManager, String sql) throws DBException {
         String normalizedSql = normalizeSql(sql);
+        if (SHOW_TABLES_PATTERN.matcher(normalizedSql).matches()) {
+            dbManager.showTables();
+            return true;
+        }
+
         if (BEGIN_PATTERN.matcher(normalizedSql).matches() || START_TRANSACTION_PATTERN.matcher(normalizedSql).matches()) {
             dbManager.beginTransaction();
             return true;
