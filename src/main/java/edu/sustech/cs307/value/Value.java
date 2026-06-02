@@ -49,10 +49,15 @@ public class Value {
             }
             case CHAR -> {
                 String str = (String) value;
-                ByteBuffer buffer3 = ByteBuffer.allocate(64);
-                buffer3.putInt(str.length());
-                buffer3.put(str.getBytes());
-                yield buffer3.array();
+                byte[] bytes = str.getBytes();
+                if (bytes.length >= CHAR_SIZE) {
+                    byte[] trimmed = new byte[CHAR_SIZE];
+                    System.arraycopy(bytes, 0, trimmed, 0, CHAR_SIZE);
+                    yield trimmed;
+                }
+                byte[] padded = new byte[CHAR_SIZE];
+                System.arraycopy(bytes, 0, padded, 0, bytes.length);
+                yield padded;
             }
             default -> throw new RuntimeException("Unsupported value type: " + type);
         };
@@ -77,14 +82,7 @@ public class Value {
                 yield new Value(buffer2.getDouble());
             }
             case CHAR -> {
-                ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
-                var length = buffer3.getInt();
-                if (length < 0 || length > bytes.length - 4) {
-                    length = Math.max(0, Math.min(bytes.length, new String(bytes).trim().length()));
-                    yield new Value(new String(bytes).trim());
-                }
-                // int is 4 byte
-                String s = new String(bytes, 4, length);
+                String s = new String(bytes).trim();
                 yield new Value(s);
             }
             default -> throw new RuntimeException("Unsupported value type: " + type);
@@ -99,14 +97,6 @@ public class Value {
                 return this.value.toString();
             }
             case CHAR -> {
-                byte[] bytes = ((String) this.value).getBytes();
-                if (bytes.length >= 4) {
-                    ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
-                    int length = buffer3.getInt();
-                    if (length >= 0 && length <= bytes.length - 4) {
-                        return new String(bytes, 4, length);
-                    }
-                }
                 return ((String) this.value).trim();
             }
             default -> throw new RuntimeException("Unsupported value type: " + type);

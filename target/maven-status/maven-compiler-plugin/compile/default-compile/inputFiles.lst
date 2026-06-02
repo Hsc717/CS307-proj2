@@ -4,10 +4,12 @@ E:\CS307-proj2\src\main\java\edu\sustech\cs307\exception\ExceptionTypes.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\index\BPlusTreeIndex.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\index\Index.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\index\InMemoryOrderedIndex.java
+E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\ddl\AlterTableExecutor.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\ddl\CreateTableExecutor.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\ddl\DMLExecutor.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\ddl\ExplainExecutor.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\ddl\ShowDatabaseExecutor.java
+E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\LogicalDeleteOperator.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\LogicalFilterOperator.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\LogicalInsertOperator.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\logicalOperator\LogicalJoinOperator.java
@@ -21,6 +23,7 @@ E:\CS307-proj2\src\main\java\edu\sustech\cs307\meta\TabCol.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\meta\TableMeta.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\optimizer\LogicalPlanner.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\optimizer\PhysicalPlanner.java
+E:\CS307-proj2\src\main\java\edu\sustech\cs307\physicalOperator\DeleteOperator.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\physicalOperator\FilterOperator.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\physicalOperator\IndexScanOperator.java
 E:\CS307-proj2\src\main\java\edu\sustech\cs307\physicalOperator\InMemoryIndexScanOperator.java

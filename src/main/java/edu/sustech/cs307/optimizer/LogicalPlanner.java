@@ -7,6 +7,7 @@ import java.util.regex.Pattern;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.parser.CCJSqlParserManager;
 import net.sf.jsqlparser.parser.JSqlParser;
+import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.Commit;
 import net.sf.jsqlparser.statement.DescribeStatement;
 import net.sf.jsqlparser.statement.ExplainStatement;
@@ -23,6 +24,7 @@ import net.sf.jsqlparser.statement.create.table.CreateTable;
 import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.logicalOperator.*;
 import edu.sustech.cs307.system.DBManager;
+import edu.sustech.cs307.logicalOperator.ddl.AlterTableExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.CreateTableExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.ExplainExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
@@ -86,10 +88,39 @@ public class LogicalPlanner {
             dbManager.descTable(describeStatement.getTable().getName());
             return null;
         } else if (stmt instanceof Drop dropStatement) {
-            if (!dropStatement.getType().equalsIgnoreCase("TABLE")) {
-                throw new DBException(ExceptionTypes.UnsupportedCommand(dropStatement.toString()));
+            if (dropStatement.getType().equalsIgnoreCase("INDEX")) {
+                String indexName = dropStatement.getName().getName();
+                boolean found = false;
+                for (String tableName : dbManager.getMetaManager().getTableNames()) {
+                    var tableMeta = dbManager.getMetaManager().getTable(tableName);
+                    if (tableMeta.getIndexes().containsKey(indexName)) {
+                        tableMeta.getIndexes().remove(indexName);
+                        dbManager.getMetaManager().saveToJson();
+                        org.pmw.tinylog.Logger.info("Successfully dropped index: {}", indexName);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw new DBException(ExceptionTypes.UnsupportedCommand("DROP INDEX " + indexName));
+                }
+                return null;
+            } else if (dropStatement.getType().equalsIgnoreCase("TABLE")) {
+                dbManager.dropTable(dropStatement.getName().getName());
+                return null;
             }
-            dbManager.dropTable(dropStatement.getName().getName());
+            throw new DBException(ExceptionTypes.UnsupportedCommand(dropStatement.toString()));
+        } else if (stmt instanceof Alter alterStmt) {
+            AlterTableExecutor alterExecutor = new AlterTableExecutor(alterStmt, dbManager);
+            alterExecutor.execute();
+            return null;
+        } else if (stmt instanceof net.sf.jsqlparser.statement.create.index.CreateIndex createIndexStmt) {
+            String tableName = createIndexStmt.getTable().getName();
+            String indexName = createIndexStmt.getIndex().getName();
+            dbManager.getMetaManager().getTable(tableName).getIndexes().put(indexName,
+                    edu.sustech.cs307.meta.TableMeta.IndexType.BTREE);
+            dbManager.getMetaManager().saveToJson();
+            org.pmw.tinylog.Logger.info("Successfully created index: {} on table {}", indexName, tableName);
             return null;
         } else {
             throw new DBException(ExceptionTypes.UnsupportedCommand((stmt.toString())));

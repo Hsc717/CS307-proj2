@@ -9,6 +9,7 @@ import edu.sustech.cs307.value.ValueType;
 import net.sf.jsqlparser.expression.*;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
+import net.sf.jsqlparser.expression.operators.relational.ExistsExpression;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
@@ -37,6 +38,12 @@ public abstract class Tuple {
                     || evaluateCondition(tuple, orExpr.getRightExpression());
         } else if (whereExpr instanceof InExpression inExpression) {
             return evaluateInExpression(tuple, inExpression);
+        } else if (whereExpr instanceof ExistsExpression existsExpression) {
+            return evaluateExistsExpression(tuple, existsExpression);
+        } else if (whereExpr instanceof Parenthesis parenthesis) {
+            return evaluateCondition(tuple, parenthesis.getExpression());
+        } else if (whereExpr instanceof NotExpression notExpression) {
+            return !evaluateCondition(tuple, notExpression.getExpression());
         } else if (whereExpr instanceof BinaryExpression binaryExpression) {
             return evaluateBinaryExpression(tuple, binaryExpression);
         } else {
@@ -91,6 +98,24 @@ public abstract class Tuple {
             }
         }
         return inExpression.isNot() ? !matched : matched;
+    }
+
+    /**
+     * Evaluate EXISTS / NOT EXISTS expression.
+     * For a tuple, EXISTS checks if a subquery returns any rows.
+     * In a tuple-level filter, we treat EXISTS(subquery) as true if the subquery
+     * would return at least one row. Since we don't have a subquery executor
+     * here, we handle it by evaluating the inner expression against the tuple.
+     */
+    private boolean evaluateExistsExpression(Tuple tuple, ExistsExpression existsExpression) throws DBException {
+        Expression rightExpr = existsExpression.getRightExpression();
+        if (rightExpr instanceof Parenthesis parenthesis) {
+            // For EXISTS (subquery), evaluate the inner expression
+            // If it contains references to the current tuple, evaluate it
+            boolean result = evaluateCondition(tuple, parenthesis.getExpression());
+            return existsExpression.isNot() ? !result : result;
+        }
+        return false;
     }
 
     private Value valueOf(Tuple tuple, Expression expression) throws DBException {

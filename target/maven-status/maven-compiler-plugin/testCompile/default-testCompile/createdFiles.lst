@@ -7,6 +7,7 @@ storage\LRUReplacerTest.class
 record\RecordFileHandleTest$BasicCRUDTests.class
 storage\DiskManagerTest.class
 record\RecordFileHandleTest$PageManagementTests.class
+feature\AdvancedFeatureTest.class
 record\RecordFileHandleTest$ExceptionHandlingTests.class
 record\RecordFileHandleTest$MetadataConsistencyTests.class
 record\RecordFileHandleTest.class

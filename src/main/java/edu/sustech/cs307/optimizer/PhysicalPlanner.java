@@ -5,10 +5,15 @@ import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.logicalOperator.*;
 import edu.sustech.cs307.physicalOperator.*;
 import edu.sustech.cs307.system.DBManager;
+import edu.sustech.cs307.index.InMemoryOrderedIndex;
+import edu.sustech.cs307.physicalOperator.InMemoryIndexScanOperator;
+import edu.sustech.cs307.record.RID;
 import edu.sustech.cs307.value.Value;
 import edu.sustech.cs307.value.ValueType;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.TableMeta;
+import edu.sustech.cs307.meta.TabCol;
+
 
 import net.sf.jsqlparser.expression.DoubleValue;
 import net.sf.jsqlparser.expression.Expression;
@@ -55,10 +60,18 @@ public class PhysicalPlanner {
             return new SeqScanOperator(tableName, dbManager);
         }
 
-        // Check if index exists for the table (for now, assume RBTreeIndex always
-        // exists if index is defined)
+        // Check if index exists for the table
         if (tableMeta.getIndexes() != null && !tableMeta.getIndexes().isEmpty()) {
-            throw new RuntimeException("unimplement");
+            // Use the first index available for scan
+            String indexName = tableMeta.getIndexes().keySet().iterator().next();
+            String persistPath = String.format("%s/index/%s", dbManager.getDiskManager().getCurrentDir(), indexName);
+            InMemoryOrderedIndex index = new InMemoryOrderedIndex(persistPath);
+            // Return all entries via index
+            java.util.Iterator<java.util.Map.Entry<Value, RID>> allEntries = index.Range(
+                    new Value(Long.MIN_VALUE, ValueType.INTEGER),
+                    new Value(Long.MAX_VALUE, ValueType.INTEGER),
+                    true, true);
+            return new InMemoryIndexScanOperator(dbManager, tableName, index, allEntries);
         } else {
             return new SeqScanOperator(tableName, dbManager);
         }
