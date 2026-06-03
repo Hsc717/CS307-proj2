@@ -4,15 +4,18 @@ import edu.sustech.cs307.exception.DBException;
 import edu.sustech.cs307.logicalOperator.LogicalOperator;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.MetaManager;
+import edu.sustech.cs307.meta.TableMeta;
 import edu.sustech.cs307.optimizer.LogicalPlanner;
 import edu.sustech.cs307.optimizer.PhysicalPlanner;
 import edu.sustech.cs307.physicalOperator.PhysicalOperator;
 import edu.sustech.cs307.storage.BufferPool;
 import edu.sustech.cs307.storage.DiskManager;
+import edu.sustech.cs307.storage.Page;
 import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.system.RecordManager;
 import edu.sustech.cs307.system.TransactionManager;
 import edu.sustech.cs307.tuple.Tuple;
+import edu.sustech.cs307.value.Value;
 
 import org.apache.commons.lang3.StringUtils;
 import org.jline.reader.LineReader;
@@ -20,6 +23,8 @@ import org.jline.reader.LineReaderBuilder;
 import org.jline.terminal.TerminalBuilder;
 import org.pmw.tinylog.Logger;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -33,8 +38,54 @@ public class DBEntry {
     public static final int POOL_SIZE = 256 * 512;
 
     public static void printHelp() {
-        Logger.info("Type 'exit' to exit the program.");
-        Logger.info("Type 'help' to see this message again.");
+        Logger.info("============ CS307-DB 使用帮助 ============");
+        Logger.info("  exit / exit;              退出程序");
+        Logger.info("  help / help;              显示本帮助信息");
+        Logger.info("");
+        Logger.info("-- DDL (数据定义语言) --");
+        Logger.info("  CREATE TABLE t (col type, ...)   创建表");
+        Logger.info("    支持类型: INT, CHAR, VARCHAR(N), FLOAT, DOUBLE");
+        Logger.info("    示例: CREATE TABLE t (id INT, name VARCHAR(32), gpa DOUBLE)");
+        Logger.info("  DROP TABLE t                      删除表");
+        Logger.info("  SHOW TABLES                       显示所有表");
+        Logger.info("  DESCRIBE t                        查看表结构");
+        Logger.info("  ALTER TABLE t ADD col type        添加列");
+        Logger.info("    示例: ALTER TABLE t ADD age INT");
+        Logger.info("    示例: ALTER TABLE t ADD email VARCHAR(64)");
+        Logger.info("  ALTER TABLE t DROP col            删除列");
+        Logger.info("");
+        Logger.info("-- DML (数据操作语言) --");
+        Logger.info("  INSERT INTO t (cols) VALUES (...)  插入数据 (支持多行插入)");
+        Logger.info("    示例: INSERT INTO t VALUES (1,'a',3.5), (2,'b',3.6)");
+        Logger.info("  UPDATE t SET col=v WHERE ...       更新数据");
+        Logger.info("  DELETE FROM t WHERE ...            删除数据");
+        Logger.info("  SELECT ... FROM t WHERE ...        查询数据");
+        Logger.info("");
+        Logger.info("-- 支持的查询功能 --");
+        Logger.info("  投影: SELECT col1, col2 FROM t");
+        Logger.info("  条件: WHERE col = / > / >= / < / <= / <> / != value");
+        Logger.info("  逻辑: AND / OR / NOT");
+        Logger.info("  范围: IN (v1,v2,...) / NOT IN (v1,v2,...)");
+        Logger.info("  存在: EXISTS (subquery) / NOT EXISTS (subquery)");
+        Logger.info("  聚合: COUNT(*) / MAX(col) / MIN(col)");
+        Logger.info("  分组: GROUP BY col");
+        Logger.info("  排序: ORDER BY col [ASC|DESC]");
+        Logger.info("  连接: t1 JOIN t2 ON t1.col = t2.col");
+        Logger.info("  计划: EXPLAIN SELECT ...");
+        Logger.info("");
+        Logger.info("-- 索引 (B+树) --");
+        Logger.info("  CREATE INDEX name ON t(col)  创建B+树索引");
+        Logger.info("  DROP INDEX name              删除索引");
+        Logger.info("  索引加速等值查询和范围查询");
+        Logger.info("");
+        Logger.info("-- 事务 --");
+        Logger.info("  BEGIN / START TRANSACTION    开始事务 (创建快照)");
+        Logger.info("  COMMIT                       提交事务 (持久化变更)");
+        Logger.info("  ROLLBACK                     回滚事务 (恢复到BEGIN时状态)");
+        Logger.info("  SAVEPOINT name               设置保存点");
+        Logger.info("  ROLLBACK TO SAVEPOINT name   回滚到指定保存点");
+        Logger.info("  RELEASE SAVEPOINT name       释放保存点");
+        Logger.info("============================================");
     }
 
     public static void main(String[] args) throws DBException {
@@ -50,6 +101,25 @@ public class DBEntry {
             RecordManager recordManager = new RecordManager(diskManager, bufferPool);
             MetaManager metaManager = new MetaManager(DB_NAME + "/meta");
             dbManager = new DBManager(diskManager, bufferPool, recordManager, metaManager);
+
+            // Recovery: check all tables in metadata, recreate data files if missing
+            for (String tableName : metaManager.getTableNames()) {
+                String dataFile = tableName + "/data";
+                String realPath = DB_NAME + "/" + dataFile;
+                if (!new File(realPath).exists()) {
+                    Logger.info("Recovering missing data file for table: {}", tableName);
+                    int recordSize = 0;
+                    TableMeta tableMeta = metaManager.getTable(tableName);
+                    for (ColumnMeta col : tableMeta.columns_list) {
+                        recordSize += col.len;
+                    }
+                    // Ensure directory exists
+                    new File(DB_NAME + "/" + tableName).mkdirs();
+                    // Create the data file
+                    recordManager.CreateFile(dataFile, recordSize);
+                    Logger.info("Recovered data file for table: {}", tableName);
+                }
+            }
         } catch (DBException e) {
             Logger.error(e.getMessage());
             Logger.error("An error occurred during initializing. Exiting....");
@@ -71,13 +141,19 @@ public class DBEntry {
                             .build();
                     Logger.info("CS307-DB> ");
                     sql = scanner.readLine();
-                    if (sql.equalsIgnoreCase("exit")) {
+                    String trimmedSql = sql.trim();
+                    // Remove trailing semicolons for command matching
+                    while (trimmedSql.endsWith(";")) {
+                        trimmedSql = trimmedSql.substring(0, trimmedSql.length() - 1).trim();
+                    }
+                    if (trimmedSql.equalsIgnoreCase("exit")) {
                         running = false;
                         continue;
-                    } else if (sql.equalsIgnoreCase("help")) {
+                    } else if (trimmedSql.equalsIgnoreCase("help")) {
                         printHelp();
                         continue;
                     }
+                    // Use original sql (with semicolon stripped by LogicalPlanner internally)
                 } catch (Exception e) {
                     Logger.error(e.getMessage());
                     Logger.error("An error occurred. Exiting....");
@@ -112,8 +188,12 @@ public class DBEntry {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            // persist the disk manager
-            dbManager.getBufferPool().FlushAllPages("");
+            // persist runtime state before exit
+            try {
+                dbManager.persistRuntimeState();
+            } catch (DBException ex) {
+                Logger.error("Failed to persist state on error: " + ex.getMessage());
+            }
             Logger.error("Some error occurred. Exiting after persistdata...");
         }
     }

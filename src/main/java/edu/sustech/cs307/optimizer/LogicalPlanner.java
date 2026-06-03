@@ -4,6 +4,7 @@ import java.io.StringReader;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.parser.CCJSqlParserManager;
 import net.sf.jsqlparser.parser.JSqlParser;
@@ -29,6 +30,25 @@ import edu.sustech.cs307.logicalOperator.ddl.CreateTableExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.ExplainExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
 import edu.sustech.cs307.exception.DBException;
+import edu.sustech.cs307.index.InMemoryOrderedIndex;
+import edu.sustech.cs307.meta.ColumnMeta;
+import edu.sustech.cs307.meta.TableMeta;
+import edu.sustech.cs307.record.RID;
+import edu.sustech.cs307.record.Record;
+import edu.sustech.cs307.record.RecordFileHandle;
+import edu.sustech.cs307.record.RecordPageHandle;
+import edu.sustech.cs307.record.BitMap;
+import edu.sustech.cs307.storage.Page;
+import edu.sustech.cs307.value.Value;
+import edu.sustech.cs307.value.ValueType;
+import io.netty.buffer.ByteBuf;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.Writer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.TreeMap;
 
 public class LogicalPlanner {
     private static final Pattern BEGIN_PATTERN = Pattern.compile("(?i)^BEGIN(?:\\s+(?:WORK|TRANSACTION))?$");
@@ -41,6 +61,7 @@ public class LogicalPlanner {
     private static final Pattern RELEASE_SAVEPOINT_PATTERN =
             Pattern.compile("(?i)^RELEASE(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
     private static final Pattern SHOW_TABLES_PATTERN = Pattern.compile("(?i)^SHOW\\s+TABLES$");
+    private static final Pattern SHOW_INDEX_PATTERN = Pattern.compile("(?i)^SHOW\\s+INDEX\\s+(\\S+)$");
 
     public static LogicalOperator resolveAndPlan(DBManager dbManager, String sql) throws DBException {
         if (sql == null || sql.isBlank()) {
@@ -115,17 +136,105 @@ public class LogicalPlanner {
             alterExecutor.execute();
             return null;
         } else if (stmt instanceof net.sf.jsqlparser.statement.create.index.CreateIndex createIndexStmt) {
-            String tableName = createIndexStmt.getTable().getName();
-            String indexName = createIndexStmt.getIndex().getName();
-            dbManager.getMetaManager().getTable(tableName).getIndexes().put(indexName,
-                    edu.sustech.cs307.meta.TableMeta.IndexType.BTREE);
-            dbManager.getMetaManager().saveToJson();
-            org.pmw.tinylog.Logger.info("Successfully created index: {} on table {}", indexName, tableName);
+            handleCreateIndex(dbManager, createIndexStmt);
             return null;
         } else {
             throw new DBException(ExceptionTypes.UnsupportedCommand((stmt.toString())));
         }
         return operator;
+    }
+
+    /**
+     * Handle CREATE INDEX: persist metadata AND populate the index with existing table data.
+     */
+    private static void handleCreateIndex(DBManager dbManager,
+                                           net.sf.jsqlparser.statement.create.index.CreateIndex createIndexStmt)
+            throws DBException {
+        String tableName = createIndexStmt.getTable().getName();
+        String indexName = createIndexStmt.getIndex().getName();
+        var indexColumns = createIndexStmt.getIndex().getColumnsNames();
+
+        // Determine which column is being indexed
+        String indexedColumn = (indexColumns != null && !indexColumns.isEmpty())
+                ? indexColumns.get(0).toString()
+                : null;
+
+        // Add index metadata
+        dbManager.getMetaManager().getTable(tableName).getIndexes().put(indexName,
+                edu.sustech.cs307.meta.TableMeta.IndexType.BTREE);
+        dbManager.getMetaManager().saveToJson();
+
+        // Populate the index with existing data and cache it in memory
+        InMemoryOrderedIndex index = new InMemoryOrderedIndex();
+        if (indexedColumn != null && !indexedColumn.isBlank()) {
+            scanTableForIndex(dbManager, tableName, indexedColumn, index);
+        }
+
+        // Cache the index in memory for query planning
+        PhysicalPlanner.cacheIndex(indexName, index);
+        org.pmw.tinylog.Logger.info("Successfully created index: {} on table {} with {} unique keys",
+                indexName, tableName, index.size());
+    }
+
+    /**
+     * Scan all records in a table, extract the value of the indexed column,
+     * and populate a TreeMap<Value, RID> for the index.
+     */
+    private static void scanTableForIndex(DBManager dbManager, String tableName,
+                                           String indexedColumn, InMemoryOrderedIndex index)
+            throws DBException {
+        TableMeta tableMeta = dbManager.getMetaManager().getTable(tableName);
+        ColumnMeta indexedColMeta = tableMeta.getColumnMeta(indexedColumn);
+        if (indexedColMeta == null) {
+            throw new DBException(ExceptionTypes.ColumnDoesNotExist(indexedColumn));
+        }
+
+        // OpenFile internally appends "/data", so just pass the table name
+        RecordFileHandle fileHandle = dbManager.getRecordManager().OpenFile(tableName);
+
+        try {
+            int totalPages = fileHandle.getFileHeader().getNumberOfPages();
+            int recordsPerPage = fileHandle.getFileHeader().getNumberOfRecordsPrePage();
+
+            for (int pageNum = 1; pageNum <= totalPages; pageNum++) {
+                RecordPageHandle pageHandle = fileHandle.FetchPageHandle(pageNum);
+                for (int slotNum = 0; slotNum < recordsPerPage; slotNum++) {
+                    if (BitMap.isSet(pageHandle.bitmap, slotNum)) {
+                        RID rid = new RID(pageNum, slotNum);
+                        Record record = fileHandle.GetRecord(rid);
+                        ByteBuf columnValueBuf = record.GetColumnValue(
+                                indexedColMeta.getOffset(), indexedColMeta.getLen());
+                        Value columnValue = convertByteBufToValue(columnValueBuf, indexedColMeta.type);
+                        if (columnValue != null) {
+                            index.insert(columnValue, rid);
+                        }
+                    }
+                }
+                fileHandle.UnpinPageHandle(pageNum, false);
+            }
+        } finally {
+            dbManager.getRecordManager().CloseFile(fileHandle);
+        }
+    }
+
+    private static Value convertByteBufToValue(ByteBuf byteBuf, ValueType columnType) throws DBException {
+        if (columnType == ValueType.INTEGER) {
+            return new Value(byteBuf.getLong(0));
+        } else if (columnType == ValueType.CHAR) {
+            byte[] bytes = new byte[Value.CHAR_SIZE];
+            byteBuf.getBytes(0, bytes);
+            return Value.FromByte(bytes, ValueType.CHAR);
+        } else if (columnType == ValueType.VARCHAR) {
+            byte[] bytes = new byte[byteBuf.readableBytes()];
+            byteBuf.getBytes(0, bytes);
+            return Value.FromByte(bytes, ValueType.VARCHAR);
+        } else if (columnType == ValueType.FLOAT) {
+            return new Value(byteBuf.getDouble(0), ValueType.FLOAT);
+        } else if (columnType == ValueType.DOUBLE) {
+            return new Value(byteBuf.getDouble(0), ValueType.DOUBLE);
+        } else {
+            throw new DBException(ExceptionTypes.UnsupportedValueType(columnType));
+        }
     }
 
 
@@ -228,6 +337,19 @@ public class LogicalPlanner {
         if (releaseSpMatcher.matches()) {
             String savepointName = releaseSpMatcher.group(1);
             dbManager.getTransactionManager().releaseSavepoint(savepointName);
+            return true;
+        }
+
+        // Check SHOW INDEX <indexName>
+        Matcher showIndexMatcher = SHOW_INDEX_PATTERN.matcher(normalizedSql);
+        if (showIndexMatcher.matches()) {
+            String indexName = showIndexMatcher.group(1);
+            InMemoryOrderedIndex index = PhysicalPlanner.indexCache.get(indexName);
+            if (index != null) {
+                index.printTree();
+            } else {
+                org.pmw.tinylog.Logger.error("Index '{}' not found in cache. Create it first with CREATE INDEX.", indexName);
+            }
             return true;
         }
 

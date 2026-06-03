@@ -8,13 +8,15 @@ import edu.sustech.cs307.value.Value;
 import edu.sustech.cs307.value.ValueType;
 import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.alter.AlterExpression;
-import net.sf.jsqlparser.statement.alter.AlterExpression.ColumnDataType;
 import net.sf.jsqlparser.statement.create.table.ColDataType;
 import org.pmw.tinylog.Logger;
 
-import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class AlterTableExecutor implements DMLExecutor {
+
+    private static final Pattern VARCHAR_LEN_PATTERN = Pattern.compile("(?i)varchar\\s*\\(\\s*(\\d+)\\s*\\)");
 
     private final Alter alterStmt;
     private final DBManager dbManager;
@@ -59,6 +61,9 @@ public class AlterTableExecutor implements DMLExecutor {
         String columnName = colDef.getColumnName();
         ColDataType colDataType = colDef.getColDataType();
         String dataType = colDataType.getDataType();
+        String dataTypeLower = dataType.toLowerCase().trim();
+
+        Logger.info("ALTER TABLE ADD: parsing column '{}' with data type: '{}'", columnName, dataType);
 
         // Determine the total existing record size
         var tableMeta = dbManager.getMetaManager().getTable(tableName);
@@ -69,16 +74,55 @@ public class AlterTableExecutor implements DMLExecutor {
 
         ValueType valueType;
         int colLen;
-        if (dataType.equalsIgnoreCase("int")) {
+        if (dataTypeLower.equals("int") || dataTypeLower.equals("integer")) {
             valueType = ValueType.INTEGER;
             colLen = Value.INT_SIZE;
-        } else if (dataType.equalsIgnoreCase("char") || dataType.equalsIgnoreCase("varchar")) {
+        } else if (dataTypeLower.equals("char")) {
             valueType = ValueType.CHAR;
             colLen = Value.CHAR_SIZE;
-        } else if (dataType.equalsIgnoreCase("float") || dataType.equalsIgnoreCase("double")) {
+        } else if (dataTypeLower.startsWith("varchar")) {
+            // Support VARCHAR(N) syntax
+            // JSQLParser may return "VARCHAR (20)" as the full dataType string
+            int varcharLen = Value.VARCHAR_DEFAULT_SIZE;
+
+            // First try getArgumentsStringList()
+            var args = colDataType.getArgumentsStringList();
+            if (args != null && !args.isEmpty()) {
+                try {
+                    varcharLen = Integer.parseInt(args.get(0).trim());
+                } catch (NumberFormatException e) {
+                    // Fall through to regex
+                }
+            }
+
+            // If still default, try regex on the full dataType string
+            if (varcharLen == Value.VARCHAR_DEFAULT_SIZE) {
+                Matcher m = VARCHAR_LEN_PATTERN.matcher(dataType);
+                if (m.find()) {
+                    try {
+                        varcharLen = Integer.parseInt(m.group(1));
+                    } catch (NumberFormatException e) {
+                        // Keep default
+                    }
+                }
+            }
+
+            if (varcharLen <= 0 || varcharLen > 1024) {
+                throw new DBException(ExceptionTypes.InvalidSQL("ALTER TABLE ADD",
+                        String.format("VARCHAR length must be between 1 and 1024, got %d", varcharLen)));
+            }
+            valueType = ValueType.VARCHAR;
+            colLen = varcharLen;
+            Logger.info("Adding VARCHAR({}) column {} to table {}", varcharLen, columnName, tableName);
+        } else if (dataTypeLower.equals("float")) {
             valueType = ValueType.FLOAT;
             colLen = Value.FLOAT_SIZE;
+        } else if (dataTypeLower.startsWith("double")) {
+            valueType = ValueType.DOUBLE;
+            colLen = Value.DOUBLE_SIZE;
+            Logger.info("Adding DOUBLE column {} to table {}", columnName, tableName);
         } else {
+            Logger.error("ALTER TABLE ADD: unrecognized data type '{}' for column '{}'", dataType, columnName);
             throw new DBException(ExceptionTypes.UnsupportedCommand(
                     "ALTER TABLE ADD unsupported data type: " + dataType));
         }

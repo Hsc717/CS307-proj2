@@ -54,8 +54,15 @@ public class TableTuple extends Tuple {
             byte[] bytes = new byte[Value.CHAR_SIZE];
             byteBuf.getBytes(0, bytes);
             return Value.FromByte(bytes, ValueType.CHAR);
+        } else if (columnType == ValueType.VARCHAR) {
+            // For VARCHAR, read the column's actual length from metadata
+            byte[] bytes = new byte[byteBuf.readableBytes()];
+            byteBuf.getBytes(0, bytes);
+            return Value.FromByte(bytes, ValueType.VARCHAR);
         } else if (columnType == ValueType.FLOAT) {
-            return new Value(byteBuf.getDouble(0));
+            return new Value(byteBuf.getDouble(0), ValueType.FLOAT);
+        } else if (columnType == ValueType.DOUBLE) {
+            return new Value(byteBuf.getDouble(0), ValueType.DOUBLE);
         } else {
             throw new DBException(ExceptionTypes.UnsupportedValueType(columnType));
         }

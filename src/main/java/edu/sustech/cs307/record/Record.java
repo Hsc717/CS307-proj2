@@ -99,6 +99,19 @@ public class Record {
      * @return 指定范围的字节缓冲区
      */
     public ByteBuf GetColumnValue(int offset, int len) {
+        // Bounds check: if offset+len exceeds record capacity (e.g. after ALTER TABLE ADD
+        // added a new column but existing records on disk don't have that column's data yet),
+        // return a zero-filled buffer so reads don't crash
+        if (offset >= this.data.capacity()) {
+            return Unpooled.buffer(len).writeZero(len);
+        }
+        if (offset + len > this.data.capacity()) {
+            int available = this.data.capacity() - offset;
+            ByteBuf buf = Unpooled.buffer(len);
+            buf.writeBytes(this.data.slice(offset, available));
+            buf.writeZero(len - available);
+            return buf;
+        }
         return this.data.slice(offset, len);
     }
 

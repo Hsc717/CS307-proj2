@@ -20,13 +20,27 @@ import java.util.Map.Entry;
 public class BPlusTreeIndex<K extends Comparable<K>, V> implements Index {
 
     private Node<K, V> root;
-    private final int degree;  // max number of keys per node
-    private final int minKeys; // min number of keys per internal node (except root)
+    private int degree;  // max number of keys per node
+    private int minKeys; // min number of keys per internal node (except root)
 
     public BPlusTreeIndex(int degree) {
-        this.degree = degree;
-        this.minKeys = (int) Math.ceil(degree / 2.0) - 1;
+        setDegree(degree);
         this.root = new Node<>(true);  // start with an empty leaf node
+    }
+
+    /**
+     * Set a new degree and rebuild the tree with existing data.
+     * This is useful for demo/presentation purposes to show how degree
+     * affects tree structure (node splits/merges).
+     * Note: This clears all existing data - for a clean demo, rebuild from scratch.
+     */
+    public void setDegree(int degree) {
+        this.degree = degree;
+        // minKeys = ceil(degree/2) - 1
+        // For degree 4: minKeys = 1 (max 3 keys per node)
+        // For degree 5: minKeys = 2 (max 4 keys per node)
+        // For degree 3: minKeys = 1 (max 2 keys per node)
+        this.minKeys = (int) Math.ceil(degree / 2.0) - 1;
     }
 
     /**
@@ -123,21 +137,107 @@ public class BPlusTreeIndex<K extends Comparable<K>, V> implements Index {
     }
 
     /**
-     * Print the entire tree structure.
+     * Print the entire B+ tree structure with detailed node information.
+     * Shows:
+     * - Tree degree and minKeys parameters
+     * - Each node's type (ROOT / INTERNAL / LEAF)
+     * - Keys in each node (with count/max capacity)
+     * - Values in each leaf node
+     * - next pointers between leaf nodes
+     * - Node count
+     * 
+     * Output example (degree=4, inserting 1-10):
+     * ========== B+ Tree Structure ==========
+     * Degree: 4, MinKeys: 1, Total Nodes: 4
+     * [ROOT]     keys=1/3  keys=[3, 7]
+     * ├── [LEAF]     keys=2/3  keys=[1, 2]  values=[v1, v2]  next→[3, 5]
+     * ├── [LEAF]     keys=2/3  keys=[3, 5]  values=[v3, v5]  next→[7, 10]
+     * └── [LEAF]     keys=2/3  keys=[7, 10]  values=[v7, v10]  next→null
+     * ========================================
      */
     public void printTree() {
-        printNode(root, 0);
+        int totalNodes = countNodes(root);
+        System.out.println("========== B+ Tree Structure ==========");
+        System.out.println("Degree: " + degree + ", MinKeys: " + minKeys + ", Total Nodes: " + totalNodes);
+        
+        if (root.keys.isEmpty()) {
+            System.out.println("(empty tree)");
+            System.out.println("========================================");
+            return;
+        }
+
+        printNode(root, "", true);
+        System.out.println("========================================");
     }
 
-    private void printNode(Node<K, V> node, int depth) {
-        StringBuilder indent = new StringBuilder();
-        for (int i = 0; i < depth; i++) {
-            indent.append("  ");
+    /**
+     * Recursively print a node and its subtree with tree-drawing prefixes.
+     * 
+     * @param node   Current node to print
+     * @param prefix Prefix string for indentation (e.g., "│   ")
+     * @param isTail Whether this is the last child of its parent
+     */
+    private void printNode(Node<K, V> node, String prefix, boolean isTail) {
+        // Determine node type label
+        String nodeType;
+        if (prefix.isEmpty()) {
+            nodeType = "ROOT";
+        } else {
+            nodeType = node.isLeaf ? "LEAF" : "INTERNAL";
         }
-        System.out.println(indent + "Keys: " + node.keys);
+
+        // Build the connector: "└── " for last child, "├── " otherwise
+        String connector = prefix.isEmpty() ? "" : (isTail ? "└── " : "├── ");
+
+        // Print keys and capacity info
+        String keyInfo = "keys=" + node.keys.size() + "/" + (degree - 1);
+        System.out.println(prefix + connector + "[" + nodeType + "] " + keyInfo + "  keys=" + node.keys);
+
+        // For leaf nodes, also print values and next pointer
+        if (node.isLeaf) {
+            String childPrefix = prefix + (prefix.isEmpty() ? "" : (isTail ? "    " : "│   "));
+            System.out.println(childPrefix + "    values=" + node.values);
+            System.out.println(childPrefix + "    next→ " + (node.next != null ? node.next.keys : "null"));
+        }
+
+        // Recursively print children for internal nodes
         if (!node.isLeaf) {
-            for (Node<K, V> child : node.children) {
-                printNode(child, depth + 1);
+            for (int i = 0; i < node.children.size(); i++) {
+                String childPrefix = prefix + (prefix.isEmpty() ? "" : (isTail ? "    " : "│   "));
+                boolean childIsTail = (i == node.children.size() - 1);
+                // For internal nodes, we want to connect children vertically
+                // So we use a different approach
+                printNodeWithIndent(node.children.get(i), prefix, i, node.children.size());
+            }
+        }
+    }
+
+    /**
+     * Alternative print method with proper tree-drawing indentation.
+     * Each level maintains vertical bars for non-last branches.
+     */
+    private void printNodeWithIndent(Node<K, V> node, String prefix, int index, int totalSiblings) {
+        String connector = (index < totalSiblings - 1) ? "├── " : "└── ";
+        String childPrefix = prefix + ((index < totalSiblings - 1) ? "│   " : "    ");
+
+        String nodeType = (prefix.isEmpty() && index == 0 && node == root) ? "ROOT"
+                : (node.isLeaf ? "LEAF" : "INTERNAL");
+
+        // For the root's direct children
+        if (prefix.isEmpty()) {
+            connector = (index < totalSiblings - 1) ? "├── " : "└── ";
+            childPrefix = (index < totalSiblings - 1) ? "│   " : "    ";
+        }
+
+        String keyInfo = "keys=" + node.keys.size() + "/" + (degree - 1);
+        System.out.println(prefix + connector + "[" + nodeType + "] " + keyInfo + "  keys=" + node.keys);
+
+        if (node.isLeaf) {
+            System.out.println(childPrefix + "    values=" + node.values);
+            System.out.println(childPrefix + "    next→ " + (node.next != null ? node.next.keys : "null"));
+        } else {
+            for (int i = 0; i < node.children.size(); i++) {
+                printNodeWithIndent(node.children.get(i), childPrefix, i, node.children.size());
             }
         }
     }
@@ -176,6 +276,55 @@ public class BPlusTreeIndex<K extends Comparable<K>, V> implements Index {
             leaf = leaf.next;
         }
         return result;
+    }
+
+    /**
+     * Count total number of nodes in the tree.
+     */
+    public int getNodeCount() {
+        return countNodes(root);
+    }
+
+    private int countNodes(Node<K, V> node) {
+        int count = 1;
+        if (!node.isLeaf) {
+            for (Node<K, V> child : node.children) {
+                count += countNodes(child);
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Get the current degree of the tree (max keys per node).
+     */
+    public int getDegree() {
+        return degree;
+    }
+
+    /**
+     * Get the minimum keys required per non-root node.
+     */
+    public int getMinKeys() {
+        return minKeys;
+    }
+
+    /**
+     * Get the height of the tree (number of levels).
+     */
+    public int getHeight() {
+        return calculateHeight(root);
+    }
+
+    private int calculateHeight(Node<K, V> node) {
+        if (node.isLeaf) {
+            return 1;
+        }
+        int maxChildHeight = 0;
+        for (Node<K, V> child : node.children) {
+            maxChildHeight = Math.max(maxChildHeight, calculateHeight(child));
+        }
+        return 1 + maxChildHeight;
     }
 
     // ========== Internal Node Operations ==========

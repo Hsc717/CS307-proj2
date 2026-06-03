@@ -176,13 +176,39 @@ public class DiskManager {
                 throw new DBException(ExceptionTypes.BadIOError(e.getMessage()));
             }
         }
+        // If the file already exists but is not tracked in filePages (e.g. after crash recovery),
+        // calculate the number of pages from the file size
+        if (!this.filePages.containsKey(filename)) {
+            long fileSize = file.length();
+            int numPages = (int) Math.max(1, fileSize / Page.DEFAULT_PAGE_SIZE);
+            if (fileSize % Page.DEFAULT_PAGE_SIZE != 0) {
+                numPages++;
+            }
+            this.filePages.put(filename, numPages);
+        }
     }
 
     // return file start;
     public Integer AllocatePage(String filename) throws DBException {
         Integer offset = this.filePages.get(filename);
         if (offset == null) {
-            throw new DBException(ExceptionTypes.BadIOError(String.format("File not exists, %s", filename)));
+            // File may exist on disk but not tracked in filePages (e.g. after crash recovery)
+            String real_path = currentDir + "/" + filename;
+            File file = new File(real_path);
+            if (file.exists()) {
+                // Recover: calculate page count from file size
+                long fileSize = file.length();
+                int numPages = (int) Math.max(1, fileSize / Page.DEFAULT_PAGE_SIZE);
+                if (fileSize % Page.DEFAULT_PAGE_SIZE != 0) {
+                    numPages++;
+                }
+                this.filePages.put(filename, numPages);
+                offset = numPages - 1; // last page is the next free slot
+                Logger.info("Recovered file tracking for {} with {} pages", filename, numPages);
+            } else {
+                throw new DBException(ExceptionTypes.BadIOError(
+                    String.format("File not exists, %s", filename)));
+            }
         }
         this.filePages.put(filename, offset + 1);
         return offset;

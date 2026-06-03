@@ -58,6 +58,10 @@ public class TableMeta {
             throw new DBException(ExceptionTypes.ColumnAlreadyExist(columnName));
         }
         this.columns.put(columnName, column);
+        // Also add to columns_list to keep it in sync
+        if (this.columns_list != null) {
+            this.columns_list.add(column);
+        }
     }
 
     public void dropColumn(String columnName) throws DBException {
@@ -65,6 +69,10 @@ public class TableMeta {
             throw new DBException(ExceptionTypes.ColumnDoesNotExist(columnName));
         }
         this.columns.remove(columnName);
+        // Also remove from columns_list to keep it in sync with columns map
+        if (this.columns_list != null) {
+            this.columns_list.removeIf(col -> col.name.equals(columnName));
+        }
     }
 
     public ColumnMeta getColumnMeta(String columnName) {

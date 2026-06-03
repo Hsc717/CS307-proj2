@@ -81,15 +81,9 @@ public class UpdateOperator implements PhysicalOperator {
                     newValues.set(index, newValue);
                 }
                 ByteBuf buffer = Unpooled.buffer();
-                for (Value v : newValues) {
-                    String str = "";
-                    if (v.type == ValueType.CHAR) str = (String) v.value;
-                    if (str.length() == 64) {
-                        ByteBuffer temp = ByteBuffer.allocate(64);
-                        temp.put(str.getBytes());
-                        buffer.writeBytes(temp.array());
-                    }
-                    else buffer.writeBytes(v.ToByte());
+                for (int colIdx = 0; colIdx < newValues.size(); colIdx++) {
+                    Value v = newValues.get(colIdx);
+                    buffer.writeBytes(v.ToByte());
                 }
 
                 fileHandle.UpdateRecord(tuple.getRID(), buffer);

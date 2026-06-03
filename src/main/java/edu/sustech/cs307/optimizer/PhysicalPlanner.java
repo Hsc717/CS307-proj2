@@ -6,7 +6,7 @@ import edu.sustech.cs307.logicalOperator.*;
 import edu.sustech.cs307.physicalOperator.*;
 import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.index.InMemoryOrderedIndex;
-import edu.sustech.cs307.physicalOperator.InMemoryIndexScanOperator;
+import edu.sustech.cs307.physicalOperator.IndexScanOperator;
 import edu.sustech.cs307.record.RID;
 import edu.sustech.cs307.value.Value;
 import edu.sustech.cs307.value.ValueType;
@@ -25,9 +25,39 @@ import net.sf.jsqlparser.statement.select.Values;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class PhysicalPlanner {
+
+    /**
+     * In-memory cache for index data: indexName -> InMemoryOrderedIndex.
+     * Built at CREATE INDEX time, used at query time.
+     */
+    static final Map<String, InMemoryOrderedIndex> indexCache = new HashMap<>();
+
+    /**
+     * Store a built index in the cache.
+     */
+    public static void cacheIndex(String indexName, InMemoryOrderedIndex index) {
+        indexCache.put(indexName, index);
+    }
+
+    /**
+     * Remove an index from the cache.
+     */
+    public static void removeIndex(String indexName) {
+        indexCache.remove(indexName);
+    }
+
+    /**
+     * Clear all cached indexes.
+     */
+    public static void clearIndexCache() {
+        indexCache.clear();
+    }
+
     public static PhysicalOperator generateOperator(DBManager dbManager, LogicalOperator logicalOp) throws DBException {
         if (logicalOp instanceof LogicalTableScanOperator tableScanOperator) {
             return handleTableScan(dbManager, tableScanOperator);
@@ -56,22 +86,27 @@ public class PhysicalPlanner {
         try {
             tableMeta = dbManager.getMetaManager().getTable(tableName);
         } catch (DBException e) {
-            // Fallback to SeqScan if TableMeta cannot be retrieved
             return new SeqScanOperator(tableName, dbManager);
         }
 
-        // Check if index exists for the table
+        // Check if index exists for the table AND is cached in memory
         if (tableMeta.getIndexes() != null && !tableMeta.getIndexes().isEmpty()) {
-            // Use the first index available for scan
             String indexName = tableMeta.getIndexes().keySet().iterator().next();
-            String persistPath = String.format("%s/index/%s", dbManager.getDiskManager().getCurrentDir(), indexName);
-            InMemoryOrderedIndex index = new InMemoryOrderedIndex(persistPath);
-            // Return all entries via index
-            java.util.Iterator<java.util.Map.Entry<Value, RID>> allEntries = index.Range(
-                    new Value(Long.MIN_VALUE, ValueType.INTEGER),
-                    new Value(Long.MAX_VALUE, ValueType.INTEGER),
-                    true, true);
-            return new InMemoryIndexScanOperator(dbManager, tableName, index, allEntries);
+            InMemoryOrderedIndex index = indexCache.get(indexName);
+
+            if (index != null && index.size() > 0) {
+                // Use the cached index for scan via IndexScanOperator
+                java.util.Iterator<java.util.Map.Entry<Value, RID>> allEntries = index.Range(
+                        new Value(Long.MIN_VALUE, ValueType.INTEGER),
+                        new Value(Long.MAX_VALUE, ValueType.INTEGER),
+                        true, true);
+                return new IndexScanOperator(dbManager, tableName, index, allEntries);
+            } else {
+                // Index metadata exists but no cached data — fall back to SeqScan
+                org.pmw.tinylog.Logger.info("Index {} is empty (not cached), falling back to SeqScan for table {}",
+                        indexName, tableName);
+                return new SeqScanOperator(tableName, dbManager);
+            }
         } else {
             return new SeqScanOperator(tableName, dbManager);
         }
@@ -103,22 +138,12 @@ public class PhysicalPlanner {
                 logicalProjectOp.getGroupBy(), logicalProjectOp.getOrderByElements());
     }
 
-    /**
-     * 处理将逻辑插入操作转换为物理插入运算符的过程
-     * 
-     * @param dbManager       提供数据库操作访问的数据库管理器实例
-     * @param logicalInsertOp 需要被转换的逻辑插入运算符
-     * @return 准备好执行的物理插入运算符
-     * @throws DBException 如果存在列不匹配、类型不匹配或无效SQL语法时抛出
-     */
-    @SuppressWarnings("deprecation") // for ExpressionList<?>::getExpressions
+    @SuppressWarnings("deprecation")
     private static PhysicalOperator handleInsert(DBManager dbManager, LogicalInsertOperator logicalInsertOp)
             throws DBException {
         var tableMeta = dbManager.getMetaManager().getTable(logicalInsertOp.tableName);
-        // Process columns
         List<String> columns = new ArrayList<>();
         if (logicalInsertOp.columns != null) {
-            // the length must equal to the number of columns in the table
             if (tableMeta.columns.size() != logicalInsertOp.columns.size()) {
                 throw new DBException(ExceptionTypes.InsertColumnSizeMismatch());
             }
@@ -132,9 +157,7 @@ public class PhysicalPlanner {
                 }
                 columns.add(colName);
             }
-
         } else {
-            // If no columns specified, use all table columns in order
             for (ColumnMeta columnMeta : tableMeta.columns_list) {
                 columns.add(columnMeta.name);
             }
@@ -146,7 +169,6 @@ public class PhysicalPlanner {
         if (columns.size() != valuesList.size()) {
             var element = valuesList.get(0);
             if (element instanceof ParenthesedExpressionList<?> parenthesed) {
-                // check the children reexpressions
                 for (Expression expr : valuesList) {
                     if (expr instanceof ParenthesedExpressionList<?> expressionList) {
                         if (expressionList.getExpressions().size() != columns.size()) {
@@ -163,9 +185,6 @@ public class PhysicalPlanner {
 
         List<Value> values = new ArrayList<>();
         parseValue(values, valuesList, tableMeta);
-        // will always be same size tuple
-
-        // check the
 
         return new InsertOperator(logicalInsertOp.tableName, columns,
                 values, dbManager);
@@ -176,22 +195,39 @@ public class PhysicalPlanner {
             throws DBException {
         for (int i = 0; i < valuesList.size(); i++) {
             var expr = valuesList.getExpressions().get(i);
+            // 如果遇到的是子表达式列表 (即多行 INSERT 中的某一行),
+            // 递归展开, 不要再把它当作单值去对应 tableMeta 的第 i 列.
+            if (expr instanceof ParenthesedExpressionList<?> rowList) {
+                parseValue(values, (ExpressionList<?>) rowList, tableMeta);
+                continue;
+            }
+            ValueType expectedType = tableMeta.columns_list.get(i % tableMeta.columns_list.size()).type;
             if (expr instanceof StringValue string_value) {
-                if (tableMeta.columns_list.get(i).type != ValueType.CHAR) {
+                // Accept string values for CHAR and VARCHAR columns
+                if (expectedType != ValueType.CHAR && expectedType != ValueType.VARCHAR) {
                     throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
                 }
                 String value_str = string_value.getValue();
-                if (value_str.length() > 64) {
-                    value_str = value_str.substring(0, 64);
+                int maxLen = expectedType == ValueType.VARCHAR
+                        ? tableMeta.columns_list.get(i).len
+                        : Value.CHAR_SIZE;
+                if (value_str.length() > maxLen) {
+                    value_str = value_str.substring(0, maxLen);
                 }
-                values.add(new Value(value_str));
-            } else if (expr instanceof DoubleValue float_value) {
-                if (tableMeta.columns_list.get(i).type != ValueType.FLOAT) {
+                Value v = new Value(value_str, expectedType);
+                // Set columnLen so ToByte() serializes with the correct length
+                if (expectedType == ValueType.VARCHAR) {
+                    v.columnLen = maxLen;
+                }
+                values.add(v);
+            } else if (expr instanceof DoubleValue double_value) {
+                // Accept double values for FLOAT and DOUBLE columns
+                if (expectedType != ValueType.FLOAT && expectedType != ValueType.DOUBLE) {
                     throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
                 }
-                values.add(new Value(float_value.getValue()));
+                values.add(new Value(double_value.getValue(), expectedType));
             } else if (expr instanceof LongValue long_value) {
-                if (tableMeta.columns_list.get(i).type != ValueType.INTEGER) {
+                if (expectedType != ValueType.INTEGER) {
                     throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
                 }
                 values.add(new Value(long_value.getValue()));
@@ -205,7 +241,6 @@ public class PhysicalPlanner {
 
 
     private static PhysicalOperator handleUpdate(DBManager dbManager, LogicalUpdateOperator logicalUpdateOp) throws DBException {
-        // TODO: Implement handleUpdate
         PhysicalOperator scanner = generateOperator(dbManager, logicalUpdateOp.getChild());
         if (logicalUpdateOp.getColumns().size() != 1 ) {
             throw new DBException(ExceptionTypes.InvalidSQL("INSERT", "Unsupported expression list"));

@@ -21,26 +21,31 @@ public class ValueComparer {
         if (v2 == null) {
             return 1;
         }
-        if (v1.type != v2.type) {
+        // Allow FLOAT/DOUBLE cross-comparison
+        boolean isFloatOrDouble1 = (v1.type == ValueType.FLOAT || v1.type == ValueType.DOUBLE);
+        boolean isFloatOrDouble2 = (v2.type == ValueType.FLOAT || v2.type == ValueType.DOUBLE);
+        if (v1.type != v2.type && !(isFloatOrDouble1 && isFloatOrDouble2)) {
             throw new DBException(ExceptionTypes.WrongComparisonError(v1.type, v2.type));
         }
         switch (v1.type) {
-            case INTEGER:
+            case INTEGER -> {
                 Long i1 = (Long) v1.value;
                 Long i2 = (Long) v2.value;
                 return Long.compare(i1, i2);
-            case FLOAT:
+            }
+            case FLOAT, DOUBLE -> {
                 Double d1 = (Double) v1.value;
                 Double d2 = (Double) v2.value;
                 return Double.compare(d1, d2);
-            case CHAR:
+            }
+            case CHAR, VARCHAR -> {
                 String s1 = (String) v1.value;
-                s1=s1.trim();
+                s1 = s1.trim();
                 String s2 = (String) v2.value;
-                s2=s2.trim();
+                s2 = s2.trim();
                 return s1.compareTo(s2);
-            default:
-                throw new DBException(ExceptionTypes.WrongComparisonError(v1.type, v2.type));
+            }
+            default -> throw new DBException(ExceptionTypes.WrongComparisonError(v1.type, v2.type));
         }
     }
 }
